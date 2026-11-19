@@ -27,11 +27,6 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Raw and generated datasets (keep directory placeholders only)
-/datasets/raw/*
-!/datasets/raw/.gitkeep
-/datasets/processed/*
-!/datasets/processed/.gitkeep
 
 # Generated outputs (keep directory placeholders)
 /outputs/models/*
