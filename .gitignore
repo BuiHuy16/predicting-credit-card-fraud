@@ -27,16 +27,19 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Raw/local datasets (keep only the placeholder in the requested data folder)
-/dataset/*
-!/dataset/.gitkeep
-/datasets/**
+# Raw and generated datasets (keep directory placeholders only)
+/datasets/raw/*
+!/datasets/raw/.gitkeep
+/datasets/processed/*
+!/datasets/processed/.gitkeep
 
 # Generated outputs (keep directory placeholders)
 /outputs/models/*
 !/outputs/models/.gitkeep
 /outputs/figures/*
 !/outputs/figures/.gitkeep
+/outputs/logs/*
+!/outputs/logs/.gitkeep
 /outputs/submissions/*
 !/outputs/submissions/.gitkeep
 
@@ -66,6 +69,7 @@ lightning_logs/
 *.pem
 credentials.json
 secrets.json
+kaggle.json
 /configs/*local*
 /configs/*secret*
 /configs/*credential*

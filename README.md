@@ -21,27 +21,36 @@ Các tệp dữ liệu hiện có được giữ nguyên tại:
 
 ```text
 .
+├── configs/                  # Cấu hình chạy, không lưu bí mật
 ├── datasets/
-│   ├── raw/                  # Các CSV gốc hiện có, không chỉnh sửa trực tiếp
-│   └── processed/            # Dữ liệu đã xử lý sẽ được sinh ở giai đoạn sau (nếu cần)
+│   ├── raw/                  # Các CSV gốc, chỉ đọc
+│   │   ├── train.csv
+│   │   ├── test.csv
+│   │   └── sample_submission.csv
+│   └── processed/            # Dữ liệu sinh ra sau nếu thực sự cần
+├── docs/                     # Tài liệu dự án
+├── experiments/
+│   ├── ml/                    # Metadata/kết quả thực nghiệm ML
+│   ├── dl/                    # Metadata/kết quả thực nghiệm DL
+│   └── comparison/            # Kết quả so sánh ML/DL
 ├── notebooks/                # Notebook khảo sát và thử nghiệm có kiểm soát
+├── outputs/
+│   ├── models/               # Model và checkpoint sinh tự động
+│   ├── figures/              # Biểu đồ sinh tự động
+│   ├── logs/                 # Log chạy sinh tự động
+│   └── submissions/          # Các submission.csv sinh tự động
 ├── src/
+│   ├── __init__.py
 │   ├── data/                 # Đọc dữ liệu và preprocessing (sẽ triển khai sau)
 │   ├── models/               # Định nghĩa mô hình ML/DL (sẽ triển khai sau)
 │   ├── training/             # Quy trình huấn luyện (sẽ triển khai sau)
 │   ├── evaluation/           # Metric và đánh giá (sẽ triển khai sau)
 │   └── prediction/           # Suy luận và tạo submission (sẽ triển khai sau)
-├── configs/                  # Cấu hình chạy, không lưu bí mật
-├── experiments/              # Ghi chép/metadata cho các lần chạy
-├── outputs/
-│   ├── models/               # Model và checkpoint sinh tự động
-│   ├── figures/              # Biểu đồ sinh tự động
-│   └── submissions/          # Các submission.csv sinh tự động
 ├── tests/                    # Kiểm thử tự động
-├── docs/                     # Tài liệu dự án
+├── .gitignore                # Quy tắc loại trừ tệp cục bộ/sinh tự động
 ├── README.md                 # Tổng quan và hướng dẫn sử dụng dự án
 ├── requirements.txt          # Dependency nền tảng
-└── .gitignore                # Quy tắc loại trừ tệp cục bộ/sinh tự động
+└── roadmap.md                # Kế hoạch dự án, giữ tại thư mục gốc
 ```
 
 ## Thiết lập môi trường
