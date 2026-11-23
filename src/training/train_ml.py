@@ -53,6 +53,12 @@ def train_single_model(
         logger.warning("No specific config for %s; using default parameters.", model_name)
 
     handle_imbalance = bool(model_cfg.get("handle_imbalance", True))
+    use_feature_engineering = bool(
+        model_cfg.get(
+            "use_feature_engineering",
+            config.get("use_feature_engineering", True),
+        )
+    )
     params = dict(model_cfg.get("params", {}))
     early_stopping_rounds = model_cfg.get("early_stopping_rounds", None)
     eval_cfg = config.get("evaluation", {})
@@ -90,6 +96,7 @@ def train_single_model(
         model_name=model_name,
         params=params,
         handle_imbalance=handle_imbalance,
+        use_feature_engineering=use_feature_engineering,
         random_seed=random_seed,
     )
 

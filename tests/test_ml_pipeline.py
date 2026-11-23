@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 import joblib
 import numpy as np
@@ -26,6 +27,11 @@ from src.models.ml import (
     MLPipeline,
     build_model,
     make_tree_preprocessor,
+)
+from src.models.ml_features import (
+    ALL_NUMERIC_FEATURES,
+    ENGINEERED_NUMERIC_FEATURES,
+    MLFeatureEngineer,
 )
 from src.prediction.predict_ml import load_pipeline, predict_probabilities
 
@@ -80,6 +86,38 @@ class TestMLPipeline(unittest.TestCase):
         self.y_train = self.train_df[TARGET_COLUMN]
         self.X_val = self.val_df.loc[:, list(FEATURE_COLUMNS)]
         self.y_val = self.val_df[TARGET_COLUMN]
+
+    def test_feature_engineer_no_leakage(self) -> None:
+        """Verify MLFeatureEngineer only learns stats from train and handles unseen val data."""
+        fe = MLFeatureEngineer()
+        fe.fit(self.X_train)
+
+        # 1. Verify statistics are strictly from X_train
+        expected_global_mean = float(self.X_train["amount_usd"].mean())
+        self.assertAlmostEqual(fe.global_amount_mean_, expected_global_mean, places=5)
+        for cat, mean_val in fe.category_amount_mean_.items():
+            expected_cat_mean = float(
+                self.X_train.loc[self.X_train["merchant_category"] == cat, "amount_usd"].mean()
+            )
+            self.assertAlmostEqual(mean_val, expected_cat_mean, places=5)
+
+        # 2. Transform validation set and check shapes and columns
+        X_val_trans = fe.transform(self.X_val)
+        for col in ENGINEERED_NUMERIC_FEATURES:
+            self.assertIn(col, X_val_trans.columns)
+            self.assertTrue(np.isfinite(X_val_trans[col].to_numpy()).all())
+            self.assertFalse(X_val_trans[col].isna().any())
+
+        # 3. Inject extreme values and unseen category into validation; verify train stats unchanged
+        X_val_unseen = self.X_val.copy()
+        X_val_unseen["merchant_category"] = "unseen_rare_merchant_999"
+        X_val_unseen["amount_usd"] = 1_000_000.0
+        X_val_unseen_trans = fe.transform(X_val_unseen)
+
+        # Verify fitted attributes did not leak or mutate
+        self.assertAlmostEqual(fe.global_amount_mean_, expected_global_mean, places=5)
+        self.assertNotIn("unseen_rare_merchant_999", fe.category_amount_mean_)
+        self.assertTrue(np.isfinite(X_val_unseen_trans["amount_by_category_zscore"].to_numpy()).all())
 
     def test_logistic_regression_pipeline(self) -> None:
         """Test Logistic Regression fitting, probability range, and output shape."""
@@ -138,7 +176,7 @@ class TestMLPipeline(unittest.TestCase):
                 else:
                     pipeline = build_model(
                         model_name,
-                        params={"n_estimators": 15, "iterations": 15},
+                        params={"n_estimators": 15},
                         random_seed=42,
                     )
                     pipeline.fit(
@@ -151,6 +189,32 @@ class TestMLPipeline(unittest.TestCase):
                     probs = pipeline.predict_fraud_probability(self.X_val)
                     self.assertEqual(len(probs), len(self.val_df))
                     self.assertTrue((probs >= 0.0).all() and (probs <= 1.0).all())
+
+    def test_lightgbm_auc_early_stopping(self) -> None:
+        """Test LightGBM end-to-end pipeline specifically with eval_metric='auc'."""
+        if not HAS_LIGHTGBM:
+            self.skipTest("LightGBM not installed.")
+
+        pipeline = build_model(
+            "lightgbm",
+            params={"n_estimators": 25, "learning_rate": 0.1, "metric": "auc"},
+            use_feature_engineering=True,
+            handle_imbalance=False,
+            random_seed=42,
+        )
+        pipeline.fit(
+            self.X_train,
+            self.y_train,
+            X_val=self.X_val,
+            y_val=self.y_val,
+            early_stopping_rounds=5,
+        )
+        probs = pipeline.predict_fraud_probability(self.X_val)
+
+        self.assertEqual(len(probs), len(self.val_df))
+        self.assertTrue(np.isfinite(probs).all())
+        self.assertTrue((probs >= 0.0).all() and (probs <= 1.0).all())
+        self.assertIsNotNone(pipeline.estimator.best_iteration_)
 
     def test_pipeline_serialization_and_inference(self) -> None:
         """Verify saved pipeline can be loaded and produces identical probabilities."""
