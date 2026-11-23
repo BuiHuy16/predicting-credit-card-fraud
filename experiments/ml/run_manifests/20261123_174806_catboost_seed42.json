@@ -1,0 +1,35 @@
+{
+  "run_id": "20261123_174806_catboost_seed42",
+  "timestamp": "20261123_174806",
+  "model": "catboost",
+  "split_id": "stratified-holdout-v1-seed42-val20-34abc885ee94",
+  "random_seed": 42,
+  "handle_imbalance": true,
+  "params": {
+    "iterations": 500,
+    "learning_rate": 0.05,
+    "depth": 6,
+    "eval_metric": "AUC",
+    "random_seed": 42,
+    "verbose": 0
+  },
+  "early_stopping_rounds": 30,
+  "train_time_seconds": 41.154,
+  "metrics": {
+    "roc_auc": 0.9432239002978456,
+    "pr_auc": 0.4917435462275465,
+    "threshold": 0.5,
+    "precision": 0.11549639618693328,
+    "recall": 0.8498716852010265,
+    "f1": 0.20335687237744346,
+    "true_negatives": 122437,
+    "false_positives": 15217,
+    "false_negatives": 351,
+    "true_positives": 1987
+  },
+  "artifacts": {
+    "model_path": "outputs\\models\\20261123_174806_catboost_seed42.joblib",
+    "validation_predictions_path": "outputs\\predictions\\validation\\20261123_174806_catboost_seed42_val_predictions.csv",
+    "test_predictions_path": "outputs\\submissions\\20261123_174806_catboost_seed42_submission.csv"
+  }
+}

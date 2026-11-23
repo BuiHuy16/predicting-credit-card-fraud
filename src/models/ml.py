@@ -1,0 +1,313 @@
+"""Machine Learning models and factory for Credit Card Fraud Detection."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import FunctionTransformer, OrdinalEncoder
+
+from ..data.loading import BINARY_FEATURES, CATEGORICAL_FEATURES, NUMERIC_FEATURES
+from ..data.preprocessing import _boolean_to_float32, make_preprocessor
+
+logger = logging.getLogger(__name__)
+
+# Fallback imports for optional GBDT packages
+try:
+    import xgboost as xgb
+    from xgboost import XGBClassifier
+    HAS_XGBOOST = True
+except ImportError:
+    HAS_XGBOOST = False
+    XGBClassifier = None  # type: ignore
+
+try:
+    import lightgbm as lgb
+    from lightgbm import LGBMClassifier, early_stopping as lgb_early_stopping
+    HAS_LIGHTGBM = True
+except ImportError:
+    HAS_LIGHTGBM = False
+    LGBMClassifier = None  # type: ignore
+    lgb_early_stopping = None  # type: ignore
+
+try:
+    import catboost as cb
+    from catboost import CatBoostClassifier
+    HAS_CATBOOST = True
+except ImportError:
+    HAS_CATBOOST = False
+    CatBoostClassifier = None  # type: ignore
+
+
+# Approximate ratio of majority (0) to minority (1) class in train (~550,617 / 9,351)
+DEFAULT_SCALE_POS_WEIGHT = 58.88
+
+
+def make_tree_preprocessor() -> ColumnTransformer:
+    """Build a preprocessor specifically designed for tree-based models.
+
+    - Numeric features: Median-imputed, no scaling (preserves distribution).
+    - Categorical features: Mode-imputed, OrdinalEncoded (handles unseen values safely).
+    - Binary features: Converted to float32 (0.0 / 1.0), mode-imputed.
+    Outputs a dense 2D array suitable for Random Forest, XGBoost, LightGBM, and CatBoost.
+    """
+    numeric = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
+        ]
+    )
+    categorical = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent", keep_empty_features=True)),
+            (
+                "encoder",
+                OrdinalEncoder(
+                    handle_unknown="use_encoded_value",
+                    unknown_value=-1,
+                ),
+            ),
+        ]
+    )
+    binary = Pipeline(
+        steps=[
+            (
+                "to_numeric",
+                FunctionTransformer(
+                    _boolean_to_float32,
+                    feature_names_out="one-to-one",
+                ),
+            ),
+            ("imputer", SimpleImputer(strategy="most_frequent", keep_empty_features=True)),
+        ]
+    )
+
+    return ColumnTransformer(
+        transformers=[
+            ("numeric", numeric, list(NUMERIC_FEATURES)),
+            ("categorical", categorical, list(CATEGORICAL_FEATURES)),
+            ("binary", binary, list(BINARY_FEATURES)),
+        ],
+        remainder="drop",
+        sparse_threshold=0.0,
+        verbose_feature_names_out=False,
+    )
+
+
+class MLPipeline:
+    """Unified wrapper combining preprocessing and an estimator with early-stopping support.
+
+    Guarantees no data leakage by fitting the preprocessor ONLY on the training split.
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        preprocessor: ColumnTransformer,
+        estimator: Any,
+        is_gbdt: bool = False,
+    ) -> None:
+        self.model_name = model_name
+        self.preprocessor = preprocessor
+        self.estimator = estimator
+        self.is_gbdt = is_gbdt
+        self.classes_ = np.array([0, 1])
+
+    def fit(
+        self,
+        X_train: pd.DataFrame,
+        y_train: pd.Series | np.ndarray,
+        X_val: pd.DataFrame | None = None,
+        y_val: pd.Series | np.ndarray | None = None,
+        early_stopping_rounds: int | None = None,
+    ) -> MLPipeline:
+        """Fit preprocessor only on X_train, transform datasets, and fit estimator."""
+        # 1. Fit preprocessor strictly on X_train
+        self.preprocessor.fit(X_train)
+        X_train_trans = self.preprocessor.transform(X_train)
+
+        # 2. Fit estimator (with early stopping if GBDT and val set provided)
+        if self.is_gbdt and X_val is not None and y_val is not None and early_stopping_rounds:
+            X_val_trans = self.preprocessor.transform(X_val)
+
+            if self.model_name == "xgboost":
+                self.estimator.set_params(early_stopping_rounds=early_stopping_rounds)
+                self.estimator.fit(
+                    X_train_trans,
+                    y_train,
+                    eval_set=[(X_val_trans, y_val)],
+                    verbose=False,
+                )
+            elif self.model_name == "lightgbm":
+                callbacks = [
+                    lgb_early_stopping(stopping_rounds=early_stopping_rounds, verbose=False)
+                ]
+                self.estimator.fit(
+                    X_train_trans,
+                    y_train,
+                    eval_set=[(X_val_trans, y_val)],
+                    callbacks=callbacks,
+                )
+            elif self.model_name == "catboost":
+                self.estimator.fit(
+                    X_train_trans,
+                    y_train,
+                    eval_set=(X_val_trans, y_val),
+                    early_stopping_rounds=early_stopping_rounds,
+                    verbose=False,
+                )
+            else:
+                self.estimator.fit(X_train_trans, y_train)
+        else:
+            self.estimator.fit(X_train_trans, y_train)
+
+        if hasattr(self.estimator, "classes_"):
+            self.classes_ = self.estimator.classes_
+
+        return self
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Transform input features and predict class probabilities [P(y=0), P(y=1)]."""
+        X_trans = self.preprocessor.transform(X)
+        return self.estimator.predict_proba(X_trans)
+
+    def predict_fraud_probability(self, X: pd.DataFrame) -> np.ndarray:
+        """Return 1D array of predicted probabilities for positive class (is_fraud=1)."""
+        proba = self.predict_proba(X)
+        if hasattr(self.estimator, "classes_"):
+            classes = list(self.estimator.classes_)
+            if 1 in classes:
+                return proba[:, classes.index(1)]
+        return proba[:, 1]
+
+
+def build_model(
+    model_name: str,
+    params: dict[str, Any] | None = None,
+    handle_imbalance: bool = True,
+    random_seed: int = 42,
+) -> MLPipeline:
+    """Factory creating an MLPipeline with appropriate preprocessor and estimator.
+
+    Supported model names:
+    - 'logistic_regression' (P0)
+    - 'random_forest' (P0)
+    - 'xgboost' (P0)
+    - 'lightgbm' (P1)
+    - 'catboost' (P1)
+    """
+    model_name = model_name.lower()
+    user_params = dict(params or {})
+
+    if model_name == "logistic_regression":
+        preprocessor = make_preprocessor(scale_numeric=True)
+        default_params: dict[str, Any] = {
+            "C": 1.0,
+            "max_iter": 1000,
+            "solver": "lbfgs",
+            "random_state": random_seed,
+        }
+        if handle_imbalance:
+            default_params["class_weight"] = "balanced"
+        default_params.update(user_params)
+        estimator = LogisticRegression(**default_params)
+        return MLPipeline(model_name, preprocessor, estimator, is_gbdt=False)
+
+    elif model_name == "random_forest":
+        preprocessor = make_tree_preprocessor()
+        default_params = {
+            "n_estimators": 100,
+            "max_depth": 12,
+            "min_samples_split": 10,
+            "min_samples_leaf": 5,
+            "n_jobs": -1,
+            "random_state": random_seed,
+        }
+        if handle_imbalance:
+            default_params["class_weight"] = "balanced_subsample"
+        default_params.update(user_params)
+        estimator = RandomForestClassifier(**default_params)
+        return MLPipeline(model_name, preprocessor, estimator, is_gbdt=False)
+
+    elif model_name == "xgboost":
+        if not HAS_XGBOOST or XGBClassifier is None:
+            raise ImportError(
+                "xgboost is not installed. Please install it using 'pip install xgboost'."
+            )
+        preprocessor = make_tree_preprocessor()
+        default_params = {
+            "n_estimators": 500,
+            "learning_rate": 0.05,
+            "max_depth": 6,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "eval_metric": "auc",
+            "random_state": random_seed,
+            "n_jobs": -1,
+        }
+        if handle_imbalance and "scale_pos_weight" not in user_params:
+            default_params["scale_pos_weight"] = DEFAULT_SCALE_POS_WEIGHT
+        default_params.update(user_params)
+        estimator = XGBClassifier(**default_params)
+        return MLPipeline(model_name, preprocessor, estimator, is_gbdt=True)
+
+    elif model_name == "lightgbm":
+        if not HAS_LIGHTGBM or LGBMClassifier is None:
+            raise ImportError(
+                "lightgbm is not installed. Please install it using 'pip install lightgbm'."
+            )
+        preprocessor = make_tree_preprocessor()
+        default_params = {
+            "n_estimators": 500,
+            "learning_rate": 0.05,
+            "num_leaves": 31,
+            "max_depth": -1,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "random_state": random_seed,
+            "n_jobs": -1,
+            "verbose": -1,
+        }
+        if handle_imbalance and "scale_pos_weight" not in user_params:
+            default_params["scale_pos_weight"] = DEFAULT_SCALE_POS_WEIGHT
+        default_params.update(user_params)
+        estimator = LGBMClassifier(**default_params)
+        return MLPipeline(model_name, preprocessor, estimator, is_gbdt=True)
+
+    elif model_name == "catboost":
+        if not HAS_CATBOOST or CatBoostClassifier is None:
+            raise ImportError(
+                "catboost is not installed. Please install it using 'pip install catboost'."
+            )
+        preprocessor = make_tree_preprocessor()
+        default_params = {
+            "iterations": 500,
+            "learning_rate": 0.05,
+            "depth": 6,
+            "eval_metric": "AUC",
+            "random_seed": random_seed,
+            "verbose": 0,
+        }
+        if handle_imbalance and "auto_class_weights" not in user_params:
+            default_params["auto_class_weights"] = "Balanced"
+        default_params.update(user_params)
+        estimator = CatBoostClassifier(**default_params)
+        return MLPipeline(model_name, preprocessor, estimator, is_gbdt=True)
+
+    else:
+        supported = [
+            "logistic_regression",
+            "random_forest",
+            "xgboost",
+            "lightgbm",
+            "catboost",
+        ]
+        raise ValueError(
+            f"Unsupported model_name: {model_name!r}. Supported models: {supported}"
+        )

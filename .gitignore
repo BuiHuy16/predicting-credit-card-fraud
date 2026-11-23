@@ -76,3 +76,5 @@ kaggle.json
 tmp/
 temp/
 
+catboost_info/
+outputs/predictions/

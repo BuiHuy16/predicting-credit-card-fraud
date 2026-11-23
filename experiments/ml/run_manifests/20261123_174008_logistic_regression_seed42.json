@@ -1,0 +1,33 @@
+{
+  "run_id": "20261123_174008_logistic_regression_seed42",
+  "timestamp": "20261123_174008",
+  "model": "logistic_regression",
+  "split_id": "stratified-holdout-v1-seed42-val20-34abc885ee94",
+  "random_seed": 42,
+  "handle_imbalance": true,
+  "params": {
+    "C": 1.0,
+    "max_iter": 1000,
+    "solver": "lbfgs",
+    "random_state": 42
+  },
+  "early_stopping_rounds": null,
+  "train_time_seconds": 8.68,
+  "metrics": {
+    "roc_auc": 0.9389496455469989,
+    "pr_auc": 0.47255560238242594,
+    "threshold": 0.5,
+    "precision": 0.10684519008442221,
+    "recall": 0.8498716852010265,
+    "f1": 0.18982565082397898,
+    "true_negatives": 121044,
+    "false_positives": 16610,
+    "false_negatives": 351,
+    "true_positives": 1987
+  },
+  "artifacts": {
+    "model_path": "outputs\\models\\20261123_174008_logistic_regression_seed42.joblib",
+    "validation_predictions_path": "outputs\\predictions\\validation\\20261123_174008_logistic_regression_seed42_val_predictions.csv",
+    "test_predictions_path": "outputs\\submissions\\20261123_174008_logistic_regression_seed42_submission.csv"
+  }
+}
