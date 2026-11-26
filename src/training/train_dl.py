@@ -58,6 +58,26 @@ def dense_float32(values: object) -> np.ndarray:
     return np.ascontiguousarray(array)
 
 
+def make_criterion(
+    targets: np.ndarray,
+    *,
+    class_weighting: bool,
+    device: torch.device,
+) -> tuple[nn.BCEWithLogitsLoss, float | None]:
+    if not class_weighting:
+        return nn.BCEWithLogitsLoss(), None
+
+    labels = np.asarray(targets).reshape(-1)
+    positive_count = int(np.count_nonzero(labels == 1))
+    negative_count = int(np.count_nonzero(labels == 0))
+    if positive_count == 0 or negative_count == 0:
+        raise ValueError("pos_weight requires both target classes in the training partition.")
+
+    pos_weight = negative_count / positive_count
+    weight_tensor = torch.tensor([pos_weight], dtype=torch.float32, device=device)
+    return nn.BCEWithLogitsLoss(pos_weight=weight_tensor), pos_weight
+
+
 def make_split_preprocessor(excluded: tuple[str, ...]):
     import src.data.preprocessing as preprocessing_module
 
@@ -130,7 +150,11 @@ def smoke_test(config: dict[str, Any]) -> None:
     logits = model(batch_features)
     if logits.shape != (16, 1) or not torch.isfinite(logits).all():
         raise RuntimeError("Smoke forward pass failed shape or finite checks.")
-    criterion = nn.BCEWithLogitsLoss()
+    criterion, pos_weight = make_criterion(
+        split.y_train.to_numpy(dtype=np.float32),
+        class_weighting=bool(config["training"].get("class_weighting", False)),
+        device=device,
+    )
     optimizer = torch.optim.Adam(model.parameters(), lr=float(config["training"]["learning_rate"]))
     target = torch.from_numpy(y_train[:16])
     optimizer.zero_grad()
@@ -168,6 +192,7 @@ def smoke_test(config: dict[str, Any]) -> None:
                 "validation_shape": list(validation_array.shape),
                 "probability_count": int(probabilities.shape[0]),
                 "target_classes": sorted(int(value) for value in np.unique(targets)),
+                "pos_weight": pos_weight,
             },
             ensure_ascii=False,
         )
@@ -216,7 +241,11 @@ def train_baseline(config: dict[str, Any]) -> dict[str, Any]:
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
 
     training = config["training"]
-    criterion = nn.BCEWithLogitsLoss()
+    criterion, pos_weight = make_criterion(
+        y_train,
+        class_weighting=bool(training.get("class_weighting", False)),
+        device=device,
+    )
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=float(training["learning_rate"]),
@@ -252,6 +281,8 @@ def train_baseline(config: dict[str, Any]) -> dict[str, Any]:
         "input_dim": input_dim,
         "parameter_count": parameter_count,
         "feature_order": feature_order,
+        "class_weighting": bool(training.get("class_weighting", False)),
+        "pos_weight": pos_weight,
     }
     with (run_dir / "config.yaml").open("w", encoding="utf-8") as handle:
         yaml.safe_dump(actual_config, handle, sort_keys=False)
@@ -268,6 +299,7 @@ def train_baseline(config: dict[str, Any]) -> dict[str, Any]:
     ]
     log_rows: list[dict[str, Any]] = []
     best_roc_auc = -float("inf")
+    best_stopping_roc_auc = -float("inf")
     best_epoch = 0
     epochs_without_improvement = 0
     min_delta = float(training["early_stopping_min_delta"])
@@ -323,10 +355,9 @@ def train_baseline(config: dict[str, Any]) -> dict[str, Any]:
             flush=True,
         )
 
-        if roc_auc > best_roc_auc + min_delta:
+        if roc_auc > best_roc_auc:
             best_roc_auc = roc_auc
             best_epoch = epoch
-            epochs_without_improvement = 0
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
@@ -345,6 +376,8 @@ def train_baseline(config: dict[str, Any]) -> dict[str, Any]:
                     "best_validation_roc_auc": best_roc_auc,
                     "feature_order": feature_order,
                     "temporarily_excluded_features": list(excluded),
+                    "class_weighting": bool(training.get("class_weighting", False)),
+                    "pos_weight": pos_weight,
                     "preprocessor_path": str(preprocessor_path),
                     "preprocessor_checksum": None,
                     "pytorch_version": torch_version(),
@@ -352,6 +385,10 @@ def train_baseline(config: dict[str, Any]) -> dict[str, Any]:
                 },
                 checkpoint_path,
             )
+
+        if roc_auc > best_stopping_roc_auc + min_delta:
+            best_stopping_roc_auc = roc_auc
+            epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= patience:
@@ -398,6 +435,8 @@ def train_baseline(config: dict[str, Any]) -> dict[str, Any]:
         "seed_split": int(config["seed_split"]),
         "feature_order": feature_order,
         "temporarily_excluded_features": list(excluded),
+        "class_weighting": bool(training.get("class_weighting", False)),
+        "pos_weight": pos_weight,
         "preprocessing": "train-fit dense float32 preprocessor",
         "train_rows": int(train_array.shape[0]),
         "validation_rows": int(validation_array.shape[0]),
