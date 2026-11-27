@@ -32,7 +32,7 @@ SUBMISSION_PATH = PROJECT_ROOT / "outputs" / "submissions" / "submission.csv"
 DEFAULT_BATCH_SIZE = 8192
 
 
-def _load_baseline(
+def _load_run(
     checkpoint_path: Path,
     preprocessor_path: Path,
     config_path: Path,
@@ -46,8 +46,12 @@ def _load_baseline(
     with config_path.open("r", encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
 
-    if checkpoint.get("run_id") != RUN_ID or config.get("run_id") != RUN_ID:
-        raise ValueError(f"Expected baseline run_id {RUN_ID!r}.")
+    config_run_id = config.get("run_id")
+    if not config_run_id or checkpoint.get("run_id") != config_run_id:
+        raise ValueError("Checkpoint and config run_id values do not match.")
+    config_split_id = config.get("split_id")
+    if not config_split_id or checkpoint.get("split_id") != config_split_id:
+        raise ValueError("Checkpoint and config split_id values do not match.")
 
     excluded = checkpoint.get("temporarily_excluded_features")
     if excluded != config["preprocessing"]["temporarily_excluded_features"]:
@@ -182,7 +186,7 @@ def run_inference(
 ) -> dict[str, Any]:
     test = load_test(test_path)
     sample_submission = pd.read_csv(sample_submission_path)
-    model, preprocessor, checkpoint = _load_baseline(
+    model, preprocessor, checkpoint = _load_run(
         checkpoint_path,
         preprocessor_path,
         config_path,
@@ -211,7 +215,7 @@ def run_inference(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate the DL baseline test submission.")
+    parser = argparse.ArgumentParser(description="Generate a DL test submission from a saved run.")
     parser.add_argument("--test", type=Path, default=TEST_PATH)
     parser.add_argument("--sample-submission", type=Path, default=SAMPLE_SUBMISSION_PATH)
     parser.add_argument("--checkpoint", type=Path, default=CHECKPOINT_PATH)
