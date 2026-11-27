@@ -1,0 +1,57 @@
+run_id: dl_mlp_seed42_tune_lr0005_v2
+seed: 42
+seed_split: 42
+split_id: stratified-holdout-v1-seed42-val20-34abc885ee94
+model:
+  hidden_dims:
+  - 128
+  - 64
+  dropout: 0.2
+training:
+  batch_size: 4096
+  epochs: 12
+  learning_rate: 0.0005
+  weight_decay: 0.0
+  early_stopping_patience: 3
+  early_stopping_min_delta: 0.0001
+  loss: BCEWithLogitsLoss
+  optimizer: Adam
+  class_weighting: false
+  num_workers: 0
+preprocessing:
+  scale_numeric: true
+  dense_float32: true
+  temporarily_excluded_features: []
+runtime:
+  device: cpu
+  python: 3.12.7
+  pytorch: 2.12.0+cpu
+  input_dim: 54
+  parameter_count: 15361
+  feature_order:
+  - amount_usd
+  - hours_since_last_txn
+  - txn_count_last_24h
+  - distance_from_home_km
+  - card_age_months
+  - customer_age
+  - account_balance_usd
+  - cvv_retry_count
+  - velocity_score
+  - time_of_day_hour
+  - day_of_week
+  - merchant_risk_score
+  - prior_disputes
+  - merchant_category
+  - card_type
+  - auth_method
+  - channel
+  - device_type
+  - is_foreign_transaction
+  - is_new_merchant
+  - used_vpn
+  - ip_country_mismatch
+  - billing_shipping_mismatch
+  - is_ai_generated_scam_attempt
+  class_weighting: false
+  pos_weight: null

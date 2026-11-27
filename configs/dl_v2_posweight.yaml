@@ -1,0 +1,25 @@
+run_id: dl_mlp_seed42_tune_posweight_v2
+seed: 42
+seed_split: 42
+split_id: stratified-holdout-v1-seed42-val20-34abc885ee94
+
+model:
+  hidden_dims: [128, 64]
+  dropout: 0.20
+
+training:
+  batch_size: 4096
+  epochs: 12
+  learning_rate: 0.001
+  weight_decay: 0.0
+  early_stopping_patience: 3
+  early_stopping_min_delta: 0.0001
+  loss: BCEWithLogitsLoss
+  optimizer: Adam
+  class_weighting: true
+  num_workers: 0
+
+preprocessing:
+  scale_numeric: true
+  dense_float32: true
+  temporarily_excluded_features: []
